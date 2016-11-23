@@ -20,15 +20,25 @@ $handler->set_structure(array(
   "type"                      => "curs",
   "xml_tag"                   => "AcF",
   "id"                        => "field_api_id",
-  "field_api_id"              => array("xml_tag" => "id",             "type" => "string"),
-  "field_a_qui_s_adre_a"      => array("xml_tag" => "AdresatA",       "type" => "string"),
-  "field_tematica"            => array("xml_tag" => "Agrupacio",      "type" => "string"),
-  "body"                      => array("xml_tag" => "ContingutAcF1",  "type" => "string"),
-  "field_informaci_d_inter_s" => array("xml_tag" => "ContingutAcF2",  "type" => "string"),
-  "field_data_d_inici"        => array("xml_tag" => "DataIni",        "type" => "date"),
-  "field_durada"              => array("xml_tag" => "Durada",         "type" => "string"),
-  "field_llocs"               => array("xml_tag" => "Lloc",           "type" => "string"),
-  "title_field"               => array("xml_tag" => "Nom",            "type" => "string")
+  "language"                  => array("default" => "ca"),
+  "field_api_id"              => array("xml_tag" => "id",                                     "type" => "string"),
+  "field_a_qui_s_adre_a"      => array("xml_tag" => "AdresatA",                               "type" => "string"),
+  "field_tematica"            => array("xml_tag" => "Agrupacio",                              "type" => "term_reference"),
+  "body"                      => array("xml_tag" => array("ContingutAcF1", "ContingutAcF2"),  "type" => "textarea"),
+  "field_data_d_inici"        => array("xml_tag" => "DataIni",                                "type" => "date",           "format" => "Y-m-d\TH:i:s"),
+  "field_durada"              => array("xml_tag" => "Durada",                                 "type" => "string"),
+  "field_llocs"               => array("xml_tag" => "Lloc",                                   "type" => "term_reference"),
+  "title"                     => array("xml_tag" => "Nom",                                    "type" => "string"),
+  "field_sessions"            => array("xml_tag" => "sessions",                               "type" => "multiple",       "structure" => array(
+      "type"                => "curs_sessi_",
+      "xml_tag"             => "Sessions",
+      "id"                  => "field_api_id",
+      "title"               => array("custom" => "Sessió {index}",              "type" => "string"),
+      "field_data_d_inici"  => array("xml_tag" => "data",                       "type" => "date", "format" => "Y-m-d\TH:i:s"),
+      "field_horari"        => array("xml_tag" => array("horaInici", "horaFi"), "type" => "date", "format" => "Y-m-d\TH:i:s"),
+      "field_ubicacio"      => array("xml_tag" => "ubicacio",                   "type" => "string"),
+      "field_api_id"        => array("xml_tag" => array("{index}", "data"),     "type" => "string")
+    ))
   ));
 $handler->login("cron", "I01M2ec}$#2#P9b");
 $handler->import();
