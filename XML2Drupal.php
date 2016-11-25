@@ -42,7 +42,7 @@ class XML2Drupal {
   // Initilization methods
   /***********************************************************/
 
-  public function import($xml, $structure) {
+  public function import($xml, $structure, $item_sufix = false) {
     /*--------------------------*/
     // 1 - Loads the XML
     /*--------------------------*/
@@ -97,12 +97,15 @@ class XML2Drupal {
     // 5 - Fetchs at data base for the nodes with a value (at the field
     //     specified as id existing) on the xml
     /*--------------------------*/
-    $existing_nodes = db_select($table_name, 'n')
-      ->fields('n', array('entity_id', $column_name))
-      ->condition('bundle', $structure["type"], '=')
-      ->condition($column_name, $items_ids, 'IN')
-      ->execute()
-      ->fetchAllAssoc($column_name);
+    $existing_nodes = array();
+    if ($items_ids) {
+      $existing_nodes = db_select($table_name, 'n')
+        ->fields('n', array('entity_id', $column_name))
+        ->condition('bundle', $structure["type"], '=')
+        ->condition($column_name, $items_ids, 'IN')
+        ->execute()
+        ->fetchAllAssoc($column_name);
+    }
 
     /*--------------------------*/
     // 6 - Filters the nodes as "node to create" or "node to update"
@@ -122,23 +125,34 @@ class XML2Drupal {
     // 7 - Creation and updation
     /*--------------------------*/
     $index = 1;
+    $succeed_nids = array();
     foreach ($nodes_to_create as $item_data) {
       $this->event("-----------------------------------------------------------------");
       $this->event($index.'/'.$total_items);
       $this->event("Creating node: ".$item_data["id"]);
-      $this->create_node($item_data, $structure, $index);
+      $nid = $this->create_node($item_data, $structure, $index, $item_sufix);
       $this->event("-----------------------------------------------------------------".PHP_EOL);
+
+      if ($nid) {
+        array_push($succeed_nids, $nid);
+      }
     }
 
     foreach ($nodes_to_update as $item_data) {
       $this->event("-----------------------------------------------------------------");
       $this->event($index.'/'.$total_items);
       $this->event("Updating node: ".$item_data["id"]);
-      $this->update_node($item_data, $structure, $index);
+      $nid = $this->update_node($item_data, $structure, $index, $item_sufix);
       $this->event("-----------------------------------------------------------------".PHP_EOL);
+
+      if ($nid) {
+        array_push($succeed_nids, $nid);
+      }
     }
 
     $this->event("Import finished");
+
+    return $succeed_nids;
   }
 
   public function load_xml() {
@@ -180,25 +194,30 @@ class XML2Drupal {
     }
   }
 
-  public function create_node($item_data, $structure, &$index) {
+  public function create_node($item_data, $structure, &$index, $item_sufix = false) {
     $node = entity_create("node", array("type" => $structure["type"]));
     $node->uid = $this->user->uid;
     $emw_node = entity_metadata_wrapper("node", $node);
-    $this->emw_set_fields($emw_node, $item_data["item"], $structure, $index, $item_data["id"]);
+    $succeed = $this->emw_set_fields($emw_node, $item_data["item"], $structure, $index, $item_data["id"], $item_sufix);
+
+    return ($succeed ? $emw_node->getIdentifier() : false);
   }
 
-  public function update_node($item_data, $structure, &$index) {
+  public function update_node($item_data, $structure, &$index, $item_sufix = false) {
     $node = node_load($item_data["nid"]);
     $emw_node = entity_metadata_wrapper("node", $node);
-    $this->emw_set_fields($emw_node, $item_data["item"], $structure, $index, $item_data["id"]);
+    $succeed = $this->emw_set_fields($emw_node, $item_data["item"], $structure, $index, $item_data["id"], $item_sufix);
+
+    return ($succeed ? $emw_node->getIdentifier() : false);
   }
 
-  private function emw_set_fields($emw_node, $item, $structure, &$index, $id) {
+  private function emw_set_fields(&$emw_node, $item, $structure, &$index, $id, $item_sufix = false) {
     $msg = '';
     $status = '';
     $field_id = $structure['id'];
-    $fields = array_diff_key($structure, array("type" => "", "xml_tag" => "", "id" => "", "language" => ""));
+    $fields = array_diff_key($structure, array("type" => "", "xml_tag" => "", "id" => "", "language" => "", "menu_link" => ""));
     $vars = array("{id}" => $id);
+
     if (array_key_exists("language", $structure)) {
       $language = "";
 
@@ -250,56 +269,198 @@ class XML2Drupal {
 
 
       try {
-        switch ($field_data["type"]) {
-          case 'string':
-            if ($field_value != ""){
-              $emw_node->$field_name->set(trim($field_value));
-            }
-            break;
+        if (!is_array($field_data["type"])) {
+          $field_data["type"] = array($field_data["type"]);
+        }
 
-          case 'textarea':
-
-            if(is_array($field_value)){
-              $final_value = "";
-              foreach ($field_value as $value) {
-                $final_value .= $value.PHP_EOL.PHP_EOL;
+        foreach ($field_data["type"] as $type) {
+          switch ($type) {
+            case 'string':
+              if ($field_value != ""){
+                if ($field_name == "title" && $item_sufix) {
+                  $field_value = $item_sufix.$field_value;
+                }
+                $emw_node->$field_name->set($field_value);
               }
-              $emw_node->$field_name->set(array("value" => $final_value));
-            } else if ($field_value != ""){
-              $emw_node->$field_name->set(array("value" => $field_value));
-            }
+              break;
 
-            break;
+            case 'textarea':
+              if(is_array($field_value)){
+                $final_value = "";
+                foreach ($field_value as $value) {
+                  $final_value .= $value.PHP_EOL.PHP_EOL;
+                }
+                $emw_node->$field_name->set(array("value" => $final_value));
+              } else if ($field_value != ""){
+                $emw_node->$field_name->set(array("value" => $field_value));
+              }
+              break;
 
-          case 'date':
-            if(is_array($field_value)){
-              $dates = array();
-              foreach ($field_value as $value) {
-                array_push($dates, DateTime::createFromFormat($field_data["format"], $value));
+            case 'date':
+              if(is_array($field_value)){
+                $dates = array();
+                foreach ($field_value as $value) {
+                  array_push($dates, DateTime::createFromFormat($field_data["format"], $value));
+                }
+
+                if (sizeof($dates) == 2){
+                  $emw_node->$field_name->set(array(
+                      "value" => $dates[0]->format('Y-m-d H:i:s'),
+                      "value2" => $dates[1]->format('Y-m-d H:i:s')
+                    ));
+                }
+              } else {
+                $date_value = DateTime::createFromFormat($field_data["format"], $field_value);
+                $emw_node->$field_name->set($date_value->getTimestamp());
+              }
+              break;
+
+            case 'node_creation':
+              $m_structure = $field_data["structure"];
+              $items_parent = $field_data["xml_tag"];
+              $item_sufix = false;
+
+              if (isset($field_data["item_sufix"])) {
+                $item_sufix = strtr($field_data["item_sufix"], $vars);
               }
 
-              if (sizeof($dates) == 2){
-                $emw_node->$field_name->set(array(
-                    "value" => $dates[0]->format('Y-m-d H:i:s'),
-                    "value2" => $dates[1]->format('Y-m-d H:i:s')
-                  ));
+              $nids_to_reference = $this->import($item->$items_parent, $m_structure, $item_sufix);
+              $field_value = $nids_to_reference;
+              break;
+
+            case 'node_reference':
+              $emw_node->$field_name->set($field_value);
+              break;
+
+            case '0_or_1':
+              if (is_string($field_value)) {
+                if ($field_value == "0" || $field_value == "1") {
+                  $field_value = (int)$field_value;
+                } else {
+                  $field_value = strtolower(trim($field_value));
+                  if (strcmp($field_value, "true") == 0) {
+                    $field_value = 1;
+                  } else if (strcmp($field_value, "false") == 0) {
+                    $field_value = 0;
+                  }
+                }
               }
-            } else {
-              $date_value = DateTime::createFromFormat($field_data["format"], $field_value);
-              $emw_node->$field_name->set($date_value->getTimestamp());
-            }
-            break;
 
-          case 'multiple':
-            $m_structure = $field_data["structure"];
-            $items_parent = $field_data["xml_tag"];
-            $this->import($item->$items_parent, $m_structure);
-            break;
+              $emw_node->$field_name->set($field_value);
+              break;
 
-          default:
-            $status = 'not supported';
-            $msg = "Field type \"".$field_data["type"]."\" not supported";
-            break;
+            case 'file':
+              $timestamp = round(microtime(true) * 1000);
+              $url = trim($field_value);
+              $ext = pathinfo($url, PATHINFO_EXTENSION);
+
+              $source = $url;
+              $ch = curl_init();
+              curl_setopt($ch, CURLOPT_URL, $source);
+              curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+              curl_setopt($ch, CURLOPT_SSLVERSION,3);
+              $data = curl_exec ($ch);
+              $error = curl_error($ch); 
+              curl_close ($ch);
+
+              $filename = $id.".".$ext;
+              $destination = "./tmp/".$filename;
+              $file = fopen($destination, "w+");
+              fputs($file, $data);
+              fclose($file);
+
+              $filepath = drupal_realpath($destination);
+              $public = 'public://';
+              $file_folder = '/opt/drupal7/spactiva/sites/default/files/cron';
+              $uri = file_unmanaged_move($filepath, $file_folder, FILE_EXISTS_REPLACE);
+
+              $uri = str_replace("/opt/drupal7/spactiva/sites/default/files/","public://",$uri);
+
+              $file = new stdClass();
+              $file->fid = NULL;
+              $file->uri = $uri;
+              $file->filename = drupal_basename($uri);
+              $file->filemime = file_get_mimetype($file->uri);
+              $file->uid = $this->user->uid;
+              $file->status = FILE_STATUS_PERMANENT;
+              $existing_files = file_load_multiple(array(), array('uri' => $uri));
+              if (count($existing_files)) {
+                $existing = reset($existing_files);
+                $file->fid = $existing->fid;
+                $file->filename = $existing->filename;
+              }
+              $file_saved = file_save($file);
+
+              try{
+                $emw_node->$field_name->file->set($file_saved);
+                $field_value = $file_saved;
+              } catch (Exception $exc) {
+                $this->event("File save exception, maybe you are running from console");
+              }
+
+              break;
+
+            case 'term_reference':
+              $tid = null;
+              $term = null;
+
+              if (!is_array($field_value)) {
+                $field_value = array($field_value);
+              }
+              $tids = array();
+              foreach ($field_value as $term_name) {
+                if (isset($field_data["vocabulary"])) {
+                  $term = array_shift(array_values(taxonomy_get_term_by_name($term_name, $field_data["vocabulary"])));
+
+                  if (isset($term)) {
+                    $tid = $term->tid;
+                  } else {
+                    $this->event("term \"".$term_name."\" not found at vocabulary \"".$field_data["vocabulary"]."\", creating...");
+                    $vocabulary = taxonomy_vocabulary_machine_name_load($field_data["vocabulary"]);
+
+                    if ($vocabulary != NULL) {
+                      $new_term = entity_create('taxonomy_term', array(
+                        "name" => $term_name,
+                        "vid"  => $vocabulary->vid
+                        ));
+                      taxonomy_term_save($new_term);
+                      $tid = $new_term->tid;
+                    } else {
+                      $this->event("Vocabulary \"".$field_data["vocabulary"]."\" not found");
+                    }
+                  }
+
+                  array_push($tids, $tid);
+                } else {
+                  $term = array_shift(array_values(taxonomy_get_term_by_name($term_name)));
+
+                  if (isset($term)) {
+                    $tid = $term->tid;
+                    array_push($tids, $tid);
+                  } else {
+                    $this->event("term \"".$term_name."\" not found");
+                  }
+                }
+              }
+              if (sizeof($tids) > 0) {
+                try{
+                  $emw_node->$field_name->set($tids[0]);
+                } catch (EntityMetadataWrapperException $exc) {
+                  $this->event("  field is multiple term reference");
+                  $emw_node->$field_name->set($tids);
+                }
+              } else {
+                $this->event("No tids recollected: ".var_dump($tids));
+              }
+
+              $field_value = $tids;
+              break;
+
+            default:
+              $status = 'not supported';
+              $msg = "Field type \"".$type."\" not supported";
+              break;
+          }
         }
       } catch (EntityMetadataWrapperException $exc) {
         $status = "exception";
@@ -326,20 +487,51 @@ class XML2Drupal {
       }
     }
 
+    $index += 1;
+
     if ($status == 'exception') {
       $emw_node->delete();
       $this->event("Node creation failed, node is not going to be saved.");
       return false;
     } else {
+
+      if (array_key_exists("menu_link", $structure)) {
+
+        $nid = $emw_node->getIdentifier();
+
+        if (!$nid) {
+          $emw_node = $emw_node->save();
+          $nid = $emw_node->getIdentifier();
+        }
+
+        $path = 'node/'.$nid;
+        $menu_link = menu_link_get_preferred($path, $structure["menu_link"]["menu_name"]);
+
+        if (!$menu_link) {
+          $menu_link = array(
+            'link_path' => $path,
+            'link_title' => $emw_node->title->value(),
+            'menu_name' => $structure["menu_link"]["menu_name"], // Menu machine name, for example: main-menu
+            'weight' => 0,
+            'language' => $language,
+            'plid' => $structure["menu_link"]["parent"][$language], // Parent menu item, 0 if menu item is on top level
+            'module' => 'menu',
+            );
+          try{
+            $mlid = menu_link_save($menu_link);
+            $this->event("Menu link created, mlid: ".$mlid);
+          } catch (Exception $exc) {
+            $this->event("Menu link save exception in ".__FUNCTION__."()".PHP_EOL.$exc->getMessage().PHP_EOL.$exc->getTraceAsString());
+          }
+        }
+
+      }
+
       $emw_node->save();
       $this->event("Node created and stored.");
       return true;
     }
-
-    $index += 1;
   }
-
-
 
   /************************************************************/
   // Setters
