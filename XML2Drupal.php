@@ -1,5 +1,11 @@
 <?php
-
+/**
+* XML2Drupal 1.0v
+*
+* Copyright 2016, Gerard Rodes https://github.com/GerardRodes
+*
+* Released under the MIT license - http://opensource.org/licenses/MIT
+*/
 /*-------------------------------------------------------------------*/
 // STRUCTURE MAP
 // array(
