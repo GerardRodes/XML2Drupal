@@ -1,38 +1,30 @@
 <?php
 
-if (!isset($_SERVER["REMOTE_ADDR"])) {
-  $_SERVER["REMOTE_ADDR"] = "127.0.0.1";
-}
-
-if (!isset($_SERVER["HTTP_HOST"])) {
-  $_SERVER["HTTP_HOST"] = "spactiva.dev";
-}
-
-define("DRUPAL_ROOT", "/opt/drupal7/spactiva");
 require_once DRUPAL_ROOT . "/includes/bootstrap.inc";
 drupal_bootstrap(DRUPAL_BOOTSTRAP_FULL);
 
-require_once "/opt/drupal7/spactiva/ws-cursos/XML2Drupal.php";
+require_once "./XML2Drupal.php";
 
-$handler = new XML2Drupal($log_folder = "/ws-cursos/logs");
-$handler->set_api_url("/opt/drupal7/spactiva/ws-cursos/xml_examples/FormacioPublica.xml");
+$handler = new XML2Drupal($log_folder = "/logs");
+$handler->set_api_url("http://xml.url");
 $handler->set_structure(array(
   "type"                      => "curs",
   "xml_tag"                   => "AcF",
   "id"                        => "field_api_id",
   "menu_link"                 => array("menu_name" => "main-menu", "parent" => array("es" => 1313, "ca" => 1292)),
-  "language"                  => array("default" => "ca"),
+  "language"                  => array("xml_tag" => "Language"),
   "field_imatge_principal"    => array("xml_tag" => "Img",                                    "type" => "file"),
   "promote"                   => array("xml_tag" => "Destacat",                               "type" => "0_or_1"),
   "field_api_id"              => array("xml_tag" => "id",                                     "type" => "string"),
-  "field_a_qui_s_adre_a"      => array("xml_tag" => "AdresatA",                               "type" => "string"),
+  "field_a_qui_s_adre_a"      => array("xml_tag" => "AdresatA",                               "type" => "string", "translate" => true),
   "field_tematica"            => array("xml_tag" => "Agrupacio",                              "type" => "term_reference", "vocabulary" => "tematiques_cursos"),
   "field_url_inscripcio"      => array("xml_tag" => "url",                                    "type" => "string"),
-  "body"                      => array("xml_tag" => array("ContingutAcF1", "ContingutAcF2"),  "type" => "textarea"),
+  "body"                      => array("xml_tag" => array("ContingutAcF1", "ContingutAcF2"),  "type" => "textarea", "translate" => true),
   "field_data_d_inici"        => array("xml_tag" => "DataIni",                                "type" => "date",           "format" => "Y-m-d\TH:i:s"),
   "field_durada"              => array("xml_tag" => "Durada",                                 "type" => "string"),
   "field_llocs"               => array("xml_tag" => "Lloc",                                   "type" => "term_reference", "vocabulary" => "localitzacions_cursos"),
   "title"                     => array("xml_tag" => "Nom",                                    "type" => "string"),
+  "title_field"               => array("xml_tag" => "Nom",                                    "type" => "string", "translate" => true),
   "field_sessions"            => array("xml_tag" => "sessions",                               "type" => array("node_creation","node_reference"),       "item_sufix" => "{id} - ",  "structure" => array(
       "type"                => "curs_sessi_",
       "xml_tag"             => "Sessions",
@@ -44,5 +36,5 @@ $handler->set_structure(array(
       "field_api_id"        => array("xml_tag" => array("{index}", "data"),     "type" => "string")
     ))
   ));
-$handler->login("cron", "I01M2ec}$#2#P9b");
+$handler->login("user", "pass");
 $handler->import();
