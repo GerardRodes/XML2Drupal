@@ -17,6 +17,7 @@
 //   );
 /*-------------------------------------------------------------------*/
 define('MAX_LOG_FILES', 30);
+date_default_timezone_set('Europe/Madrid');
 
 class XML2Drupal {
   
@@ -29,16 +30,18 @@ class XML2Drupal {
   private $log_folder;
   private $structure;
   private $items;
+  private $cache_images;
+  private $depth;
 
-  function __construct($log_folder = "/ws/logs", $timezone = "Europe/Madrid", $log_format_date = "Y-m-d_H-i-s", $log_prefix = "log_") {
-
+  function __construct($log_folder = "/ws/logs", $timezone = "Europe/Madrid", $log_format_date = "Y-m-d_H-i-s", $log_prefix = "log_", $depth = 0) {
+    $this->cache_images = array();
     $this->timezone = $timezone;
     date_default_timezone_set($this->timezone);
     $this->date = date($log_format_date, time());
     $this->api_url = $api_url;
     $this->log_filename = $log_prefix.$this->date.".txt";
     $this->log_folder = DRUPAL_ROOT.$log_folder;
-
+    $this->depth = $depth;
     $this->init_log();
   }
 
@@ -48,7 +51,7 @@ class XML2Drupal {
   // Initilization methods
   /***********************************************************/
 
-  public function import($xml, $structure, $item_suffix = false) {
+  public function import($xml, $structure, $item_suffix = '') {
     /*--------------------------*/
     // 1 - Loads the XML
     /*--------------------------*/
@@ -82,7 +85,7 @@ class XML2Drupal {
     $translations = 0;
     foreach ($items as $item) {
       if (is_array($xml_tag_id)) {
-        $item_id = '';
+        $item_id = $item_suffix;
 
         foreach ($xml_tag_id as $value) {
           if ($item_id != '') {
@@ -158,6 +161,7 @@ class XML2Drupal {
       $this->event($index.'/'.$total_items);
       $this->event("Creating node: ".$item_data["id"]);
       $nid = $this->create_node($item_data, $structure, $index, $item_suffix);
+      $this->event("Node created with nid: " . $nid);
       $this->event("-----------------------------------------------------------------".PHP_EOL);
 
       if ($nid) {
@@ -229,19 +233,34 @@ class XML2Drupal {
 
   public function create_node($item_data, $structure, &$index, $item_suffix = false) {
     $node = entity_create("node", array("type" => $structure["type"]));
-    $node->uid = $this->user->uid;
-    $emw_node = entity_metadata_wrapper("node", $node);
-    $succeed = $this->emw_set_fields($emw_node, $item_data["item"], $structure, $index, $item_data["id"], $item_suffix);
-
-    return ($succeed ? $emw_node->getIdentifier() : false);
+    if ($node) {
+      $node->uid = $this->user->uid;
+      $emw_node = entity_metadata_wrapper("node", $node);
+      $succeed = $this->emw_set_fields($emw_node, $item_data["item"], $structure, $index, $item_data["id"], $item_suffix);
+    } else {
+      $this->event("Something went wrong creating node: ".$item_data["nid"]);
+    }
+    if ($succeed) {
+      return $emw_node->getIdentifier();
+    } else {
+      $this->event("Something went wrong creating fields of node: ".$item_data["nid"]);
+    }
   }
 
   public function update_node($item_data, $structure, &$index, $item_suffix = false) {
     $node = node_load($item_data["nid"]);
-    $emw_node = entity_metadata_wrapper("node", $node);
-    $succeed = $this->emw_set_fields($emw_node, $item_data["item"], $structure, $index, $item_data["id"], $item_suffix);
+    if ($node) {
+      $emw_node = entity_metadata_wrapper("node", $node);
+      $succeed = $this->emw_set_fields($emw_node, $item_data["item"], $structure, $index, $item_data["id"], $item_suffix);
+    } else {
+      $this->event("Something went wrong loading node: ".$item_data["nid"]);
+    }
 
-    return ($succeed ? $emw_node->getIdentifier() : false);
+    if ($succeed) {
+      return $emw_node->getIdentifier();
+    } else {
+      $this->event("Something went wrong updating fields of node: ".$item_data["nid"]);
+    }
   }
 
   private function emw_set_fields(&$emw_node, $item_bundle, $structure, &$index, $id, $item_suffix = false) {
@@ -264,6 +283,7 @@ class XML2Drupal {
           $this->event("Language set to ".$language);
           $translating = false;
         } else  {
+          $this->event("node: ".$id);
           $this->event("Original language is ".$actual_lang);
           $this->event("Translating to ".$language);
           $translation_handler = entity_translation_get_handler('node', $emw_node->raw());
@@ -326,9 +346,9 @@ class XML2Drupal {
               switch ($type) {
                 case 'string':
                   if ($field_value != ""){
-                    if ($field_name == "title" && $item_suffix || $field_name == "title_field" && $item_suffix) {
+                    if ( ($field_name == "title" || $field_name == "title_field") && $item_suffix) {
                       $field_value = $item_suffix.$field_value;
-                      $this->event('Adding suffix '.var_dump($item_suffix).', result: '.$field_value);
+                      $this->event('Adding suffix to '.var_dump($item_suffix).', result: '.$field_value);
                     }
 
                     if ($translatable_field) {
@@ -340,6 +360,9 @@ class XML2Drupal {
                     } else if (!$translating) {
                       $emw_node->$field_name->set($field_value);
                     }
+                    $this->event("String setted: " . substr($field_value, 0, 250) );
+                  } else {
+                    $this->event("Invalid string value: -".$field_value."-");
                   }
                   break;
 
@@ -377,7 +400,10 @@ class XML2Drupal {
                         try {
                           $emw_node->language($language)->$field_name->set(array(
                             "value" => $dates[0]->format('Y-m-d H:i:s'),
-                            "value2" => $dates[1]->format('Y-m-d H:i:s')
+                            "value2" => $dates[1]->format('Y-m-d H:i:s'),
+                            "timezone" => "Europe/Madrid",
+                            "timezone_db" => "Europe/Madrid",
+                            "date_type" => "datetime"
                           ));
                         } catch (Exception $exc) {
                           $this->event("Setting field specific language value exception in ".__FUNCTION__."()".PHP_EOL.$exc->getMessage().PHP_EOL.$exc->getTraceAsString());
@@ -385,9 +411,14 @@ class XML2Drupal {
                       } else if (!$translating) {
                         $emw_node->$field_name->set(array(
                             "value" => $dates[0]->format('Y-m-d H:i:s'),
-                            "value2" => $dates[1]->format('Y-m-d H:i:s')
+                            "value2" => $dates[1]->format('Y-m-d H:i:s'),
+                            "timezone" => "Europe/Madrid",
+                            "timezone_db" => "Europe/Madrid",
+                            "date_type" => "datetime"
                           ));
                       }
+
+                      $this->event("Setted date to:\n".$this->tabs()."\tvalue 1:".$dates[0]->format('Y-m-d H:i:s')."\n".$this->tabs()."\tvalue 2:".$dates[1]->format('Y-m-d H:i:s'));
                     }
                   } else {
                     $date_value = DateTime::createFromFormat($field_data["format"], $field_value);
@@ -398,8 +429,15 @@ class XML2Drupal {
                         $this->event("Setting field specific language value exception in ".__FUNCTION__."()".PHP_EOL.$exc->getMessage().PHP_EOL.$exc->getTraceAsString());
                       }
                     } else if (!$translating) {
-                      $emw_node->$field_name->set($date_value->getTimestamp());
+                      $emw_node->raw()->$field_name = array("und" => array( 0 => array(
+                        "value" => $date_value->format('Y-m-d H:i:s'),
+                        "timezone" => "Europe/Madrid",
+                        "timezone_db" => "Europe/Madrid",
+                        "date_type" => "datetime"
+                      )));
                     }
+                      $this->event("field value: ".$field_value);
+                      $this->event("Setted date to:\n".$this->tabs()."\ttimestamp:".$date_value->getTimestamp()."\n".$this->tabs()."\tvalue:".$date_value->format('Y-m-d H:i:s'));
                   }
                   break;
 
@@ -413,13 +451,26 @@ class XML2Drupal {
                       $item_suffix = strtr($field_data["item_suffix"], $vars);
                     }
 
-                    $nids_to_reference = $this->import($item->$items_parent, $m_structure, $item_suffix);
+                    $this->depth += 1;
+                    $nids_to_reference = array();
+                    try {
+                      $nids_to_reference = $this->import($item->$items_parent, $m_structure, $item_suffix);
+                    } catch (Exception $e) {
+                      $this->event("Setting field node_creation exception in ".__FUNCTION__."()".PHP_EOL.$exc->getMessage().PHP_EOL.$exc->getTraceAsString());
+                    }
+                    $this->depth -= 1;
+
                     $field_value = $nids_to_reference;
+                    $this->event("node creationg done: " . implode(', ', $nids_to_reference) );
+
+                    $item_suffix = false;
                   }
                   break;
 
                 case 'node_reference':
+                  $this->event("referencing nodes: " . implode(', ', $field_value) );
                   if ($translatable_field) {
+
                     try {
                       $emw_node->language($language)->$field_name->set($field_value);
                     } catch (Exception $exc) {
@@ -457,61 +508,94 @@ class XML2Drupal {
 
                 case 'file':
                   $timestamp = round(microtime(true) * 1000);
-                  $url = trim($field_value);
+                  $url = str_replace(" ", "%20", trim($field_value));
+
                   $ext = pathinfo($url, PATHINFO_EXTENSION);
+                  $data = false;
+                  if ( isset($this->cache_images[$source]) ) {
+                    $data = $this->cache_images[$source];
+                    $this->event("Getting image data from cache.");
+                  } else if (strlen($ext) > 0 ) {
 
-                  $source = $url;
-                  $ch = curl_init();
-                  curl_setopt($ch, CURLOPT_URL, $source);
-                  curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-                  curl_setopt($ch, CURLOPT_SSLVERSION,3);
-                  $data = curl_exec ($ch);
-                  $error = curl_error($ch); 
-                  curl_close ($ch);
-
-                  $filename = $id.".".$ext;
-                  $destination = "./tmp/".$filename;
-                  $file = fopen($destination, "w+");
-                  fputs($file, $data);
-                  fclose($file);
-
-                  $filepath = drupal_realpath($destination);
-                  $public = 'public://';
-                  $file_folder = '/opt/drupal7/spactiva/sites/default/files/cron';
-                  $uri = file_unmanaged_move($filepath, $file_folder, FILE_EXISTS_REPLACE);
-
-                  $uri = str_replace("/opt/drupal7/spactiva/sites/default/files/","public://",$uri);
-
-                  $file = new stdClass();
-                  $file->fid = NULL;
-                  $file->uri = $uri;
-                  $file->filename = drupal_basename($uri);
-                  $file->filemime = file_get_mimetype($file->uri);
-                  $file->uid = $this->user->uid;
-                  $file->status = FILE_STATUS_PERMANENT;
-                  $existing_files = file_load_multiple(array(), array('uri' => $uri));
-                  if (count($existing_files)) {
-                    $existing = reset($existing_files);
-                    $file->fid = $existing->fid;
-                    $file->filename = $existing->filename;
-                  }
-                  $file_saved = file_save($file);
-
-                  try{
-                    if ($translatable_field) {
-                      try {
-                        $emw_node->language($language)->$field_name->file->set($file_saved);
-                      } catch (Exception $exc) {
-                        $this->event("Setting field specific language value exception in ".__FUNCTION__."()".PHP_EOL.$exc->getMessage().PHP_EOL.$exc->getTraceAsString());
+                    $url_works = false;
+                    $this->event("Getting image from url: ".$url);
+                    for ($attempts = 5; $attempts > 0; $attempts--){
+                      if ($fp = curl_init($url)) {
+                        $url_works = true;
+                        $attempts = 0;
+                        $this->event("URL worked!");
+                      } else {
+                        $this->event("URL failed, attempt: ".(6 - $attempt));
+                        sleep(2);
                       }
-                    } else if (!$translating) {
-                      $emw_node->$field_name->file->set($file_saved);
                     }
-                    $field_value = $file_saved;
-                  } catch (Exception $exc) {
-                    $this->event("File save exception, maybe you are running from console");
+
+                    if ($url_works) {
+                      $source = $url;
+                      $ch = curl_init();
+                      curl_setopt($ch, CURLOPT_URL, $source);
+                      curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+                      curl_setopt($ch, CURLOPT_SSLVERSION,3);
+                      $data = curl_exec($ch);
+                      $this->cache_images[$source] = $data;
+                      $error = curl_error($ch); 
+                      curl_close ($ch);
+                    } else {
+                      $this->event("URL failed, not data retrieved.");
+                    }
+                  } else {
+                    $this->event("Invalid file extension.");
                   }
 
+                  if ($data) {
+                    $this->event("Got data image");
+                    $filename = $id.".".$ext;
+                    $destination = "./tmp/".$filename;
+                    $file = fopen($destination, "w+");
+                    fputs($file, $data);
+                    fclose($file);
+
+                    $filepath = drupal_realpath($destination);
+
+                    $public = 'public://';
+
+                    $file_folder = '/opt/drupal7/spactiva/sites/default/files/cron';
+                    $uri = file_unmanaged_move($filepath, $file_folder, FILE_EXISTS_REPLACE);
+
+                    $uri = str_replace("/opt/drupal7/spactiva/sites/default/files/","public://",$uri);
+
+                    $file = new stdClass();
+                    $file->fid = NULL;
+                    $file->uri = $uri;
+                    $file->filename = drupal_basename($uri);
+                    $file->filemime = file_get_mimetype($file->uri);
+                    $file->uid = $this->user->uid;
+                    $file->status = FILE_STATUS_PERMANENT;
+                    $existing_files = file_load_multiple(array(), array('uri' => $uri));
+                    if (count($existing_files)) {
+                      $existing = reset($existing_files);
+                      $file->fid = $existing->fid;
+                      $file->filename = $existing->filename;
+                    }
+                    $file_saved = file_save($file);
+
+                    try{
+                      if ($translatable_field) {
+                        try {
+                          $emw_node->language($language)->$field_name->file->set($file_saved);
+                        } catch (Exception $exc) {
+                          $this->event("Setting field specific language value exception in ".__FUNCTION__."()".PHP_EOL.$exc->getMessage().PHP_EOL.$exc->getTraceAsString());
+                        }
+                      } else if (!$translating) {
+                        $emw_node->$field_name->file->set($file_saved);
+                      }
+                      $field_value = $file_saved;
+                    } catch (Exception $exc) {
+                      $this->event("File save exception, maybe you are running from console");
+                    }
+                  } else {
+                    $this->event("Url don't works, skipping field...");
+                  }
                   break;
 
                 case 'term_reference':
@@ -524,10 +608,16 @@ class XML2Drupal {
                   $tids = array();
                   foreach ($field_value as $term_name) {
                     if (isset($field_data["vocabulary"])) {
-                      $term = array_shift(array_values(taxonomy_get_term_by_name($term_name, $field_data["vocabulary"])));
+                      $tids = db_select('taxonomy_term_data', 'n')
+                        ->fields('n', array('tid', 'name', 'language'))
+                        ->condition('name', $term_name, '=')
+                        ->condition('language', $language, '=')
+                        ->execute()
+                        ->fetchCol();
 
-                      if (isset($term)) {
-                        $tid = $term->tid;
+                      if (sizeof($tids) > 0) {
+                        $this->event("term \"".$term_name."\" found at vocabulary \"".$field_data["vocabulary"]."\", setting...");
+                        $tid = $tids[0];
                       } else {
                         $this->event("term \"".$term_name."\" not found at vocabulary \"".$field_data["vocabulary"]."\", creating...");
                         $vocabulary = taxonomy_vocabulary_machine_name_load($field_data["vocabulary"]);
@@ -537,6 +627,10 @@ class XML2Drupal {
                             "name" => $term_name,
                             "vid"  => $vocabulary->vid
                             ));
+                          if ($translatable_field) {
+                            $new_term->language = $language;
+                            $this->event("term language set to: ".$language);
+                          }
                           taxonomy_term_save($new_term);
                           $tid = $new_term->tid;
                         } else {
@@ -559,11 +653,7 @@ class XML2Drupal {
                   if (sizeof($tids) > 0) {
                     try{
                       if ($translatable_field) {
-                        try {
-                          $emw_node->language($language)->$field_name->file->set($tids[0]);
-                        } catch (Exception $exc) {
-                          $this->event("Setting field specific language value exception in ".__FUNCTION__."()".PHP_EOL.$exc->getMessage().PHP_EOL.$exc->getTraceAsString());
-                        }
+                        $emw_node->language($language)->$field_name->set($tids[0]);
                       } else if (!$translating) {
                         $emw_node->$field_name->set($tids[0]);
                       }
@@ -571,7 +661,7 @@ class XML2Drupal {
                       $this->event("  field is multiple term reference");
                       if ($translatable_field) {
                         try {
-                          $emw_node->language($language)->$field_name->file->set($tids);
+                          $emw_node->language($language)->$field_name->set($tids);
                         } catch (Exception $exc) {
                           $this->event("Setting field specific language value exception in ".__FUNCTION__."()".PHP_EOL.$exc->getMessage().PHP_EOL.$exc->getTraceAsString());
                         }
@@ -680,6 +770,38 @@ class XML2Drupal {
     }
   }
 
+  public function delete_all($types) {
+    if (!is_array($types)) {
+      $types = array($types);
+    }
+
+    $nids = db_select('node', 'n')
+      ->fields('n', array('nid'))
+      ->condition('type', $types)
+      ->execute()
+      ->fetchCol();
+    $this->event("Deleting nodes: ".implode(', ',$nids));
+    node_delete_multiple($nids);
+  }
+
+  public function delete_all_terms_from_vocabulary($vids) {
+    if (!is_array($vids)) {
+      $vids = array($vids);
+    }
+
+    $tids = db_select('taxonomy_term_data', 'n')
+      ->fields('n', array('tid'))
+      ->condition('vid', $vids)
+      ->execute()
+      ->fetchCol();
+
+    $this->event("Deleting terms: ".implode(', ',$tids));
+
+    foreach ($tids as $tid) {
+      taxonomy_term_delete($tid);
+    }
+  }
+
   /************************************************************/
   // Setters
   /***********************************************************/
@@ -725,8 +847,16 @@ class XML2Drupal {
   private function event($msg) {
     echo $msg.PHP_EOL;
     $file = fopen($this->log_folder."/".$this->log_filename, "a+") or die("Unable to open file!");
-    fwrite($file, $msg.PHP_EOL);
+    fwrite($file, $this->tabs().$msg.PHP_EOL);
     fclose($file);
+  }
+
+  private function tabs(){
+    $tabs = '';
+    for($depth = $this->depth; $depth > 0; $depth --) {
+      $tabs .= "\t";
+    }
+    return $tabs;
   }
 
 }
