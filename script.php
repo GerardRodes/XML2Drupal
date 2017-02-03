@@ -22,7 +22,7 @@ $handler->set_structure(array(
   "field_llocs"               => array("xml_tag" => "Lloc",                                   "type" => "term_reference", "vocabulary" => "localitzacions_cursos"),
   "title"                     => array("xml_tag" => "Nom",                                    "type" => "string"),
   "title_field"               => array("xml_tag" => "Nom",                                    "type" => "string", "translate" => true),
-  "field_sessions"            => array("xml_tag" => "sessions",                               "type" => array("node_creation","node_reference"),       "item_sufix" => "{id} - ",  "structure" => array(
+  "field_sessions"            => array("xml_tag" => "sessions",                               "type" => array("node_creation","node_reference"),       "item_suffix" => "{id} - ",  "structure" => array(
       "type"                => "curs_sessi_",
       "xml_tag"             => "Sessions",
       "id"                  => "field_api_id",
